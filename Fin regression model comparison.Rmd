@@ -1,0 +1,1092 @@
+---
+title: "Financial Research project comparing Single-Index Regression Model with Fama French 3-factor model"
+author: "Khizar Tahir"
+output: html_document
+---
+### **A. Introduction**
+#### **Using Financial Models for Performance Evaluation** 
+
+##### Analysts utilize several methods to evaluate a companies financial performance. The financial reports of a public company allow stakeholders to gain deep insights into financial performance, but there are methods outside of reports that also provide valuable information. Looking outside the financial statements allows users to use training variables to predict how a company will perform against the market in a given period. 
+
+##### The underlying concept of a financial model states that stock returns are typcally sensitive to a set of factors. The Single Index Model (SIM) allows us to compare stock returns with market returns and is used to explain the performance of a stock using one market index. Further, the Fama French 3 (FF3) Model utilizes not only the market index factor, but also small minus big (SMB), which is concerned with the size of the firm, and high minus low (HML), which is concerned with whether a firm is growth firm or value firm.
+
+#### **Financial Models can be represented by the following equations:**
+
+#### Traditional Linear Model:
+$$y = \alpha + \beta{x}$$
+
+#### Single Index Model:
+$$R_i - R_f = \alpha_i + \beta_i(R_m - R_f)$$
+
+#### Fama French 3 Factor Model:
+$$r = R_{f} + \beta_{1}(R_{m}-R_{f}) + \beta_{s}SMB + \beta_{v}HML + \alpha$$
+
+#### Where:<br>
+$R_{f} = risk free rate$,<br>
+$R_{m} = market return$,<br>
+$R_{i} = stock return$,<br>
+$SMB = Small minus Big$,<br>
+$HML = High minus Low$,<br>
+$R_{i} - R_{f} = excess return on stock$
+
+### **B. Project Overview**
+##### In this project, we independently run the two regression models using the same dataset. We pick a training period, run regression, and evaluate the coefficients in both the equations as displayed above and use those estimates to make predictions about Returns for our prediction period. We then match our results with actual data to analyse how our models performed. 
+
+#### We will do the process through a user function that will take as input the file names to retrieve data from, vector for our training period, and a vector for our prediction period. 
+
+#### Our function will return as output, a main table containing various aspects of model analyses, a summary table, and a plot presenting an aspect of our analyses. 
+
+### **C. Code Explanation**
+
+#### **Part 1. Including Required Packages for Analysis**
+
+```{r message=FALSE}
+library(dplyr)
+library(tidyverse)
+library(reshape)
+library(cowplot)
+```
+
+#### **Part 2. Reading Datasets and Merging Dataframes**
+##### In order to run single and multiple index regressions models, several factors are required. We were provided with two datasets to accomplish our tasks. The first dataset lists the returns of specific stocks over a period of time. The second data set is compiled by Professor French and his staff, a listing of market returns, SMB, HML and risk free rates over a period of time. Both of these datasets are crucial to runing a Single Index Model and a Fama French 3 model. 
+##### Our first step is to read the provided datasets into dataframes, complete any required data cleaning and then merge the dataframes in order to join the Fama French 3 data with each of the tickers in the Stock data. 
+##### In this section, we set our dates for training and prediction and for data cleaning, we ensured that the dates in both dataframes were formatted the same, which is an important step in time series analysis.
+##### Our merged dataframe, titled df, uses dplyr to select only the columns we need for running our regressions.
+
+```{r eval=FALSE}
+  # Preparing to read data
+  fil_dir <- "C:/users/chrdo/Downloads/"
+  stocks_file <- paste(fil_dir, as.character(stocks_filename), sep = "")
+  ff3facs_file <- paste(fil_dir, as.character(ff3facs_filename), sep = "")
+  
+  # Setting dates for training and prediction
+  training_from <- as.numeric(training[1])
+  training_till <- as.numeric(training[length(training)])
+  prediction_from <- as.numeric(pred[1])
+  prediction_till <- as.numeric(pred[length(pred)])
+  
+  # Reading data
+  stocks <- read.csv(stocks_file, na.strings = "C")
+  stocks$date1 <- as.Date(as.character(stocks$date), "%m/%d/%Y")
+  stocks$finaldate <- format(stocks$date1, "%Y%m%d")
+  
+  ff3facs <- read.csv(ff3facs_file, na.strings = "C")
+  #print(colnames(ff3facs[1])) # first column is already names X.
+  ff3facs$X <- as.character(ff3facs$X) # renaming hidden X to X so the name is replaced and visible. 
+  
+  # Merging the two dataframes into one. 
+  df_temp <- merge(stocks, ff3facs, by.x = "finaldate", by.y = "X")
+  df_temp$date <- as.numeric(df_temp$finaldate)
+  
+  df <- df_temp %>%
+    mutate(exRET = RET - (RF/100),
+           FacMkt = Mkt.RF/100,
+           FacSMB = SMB/100,
+           FacHML = HML/100,
+           RF_dec = RF/100) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML, RF_dec) 
+  
+```
+
+#### **Part 3. Creating Training and Prediction Dataframes for SIM and FF3**
+##### Once we have read our datasets and merged into one dataframe, we can use the merged dataframe to create training and prediction dataframes that will cater to specific dates we would like to analyze. We create two dataframes for the training period - one for SIM and one for FF3. We then run respective regressions for each model and store the results as a list containing regressions results for each ticker. 
+##### We then created a prediction dataframe that contains the actual data for the prediction period.
+
+```{r eval=FALSE}
+  # Final dataframe to run SIM regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training_sim <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt)))
+  
+  # Final dataframe to run 3FF regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt + FacSMB + FacHML)))
+
+  # Creating prediction dataframe - ACTUAL data. 
+  df_prediction_temp <- df %>%
+    filter((date >= prediction_from) & (date <= prediction_till)) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML) %>%
+    arrange(TICKER)
+```
+
+
+#### **Visualizing The Data Prior to Analyzing Final Results**
+##### Mapping average returns for all stocks by date relative to averages of the three different paramters, we can get a glimpse into the behavior the model might predict. Below we observe that, for the training data set, the Mkt.Rf parameter closely impacts the average return varaible for all stocks by date. The other two factors show quite less impact than Mkt.Rf. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+#read in data
+daily <- read.csv("C:/RIT Courses/FIN 780 - Financial Analytics/Ass B2/780 B2 Stocks daily.csv", stringsAsFactors = FALSE, header = TRUE)
+FF3 <- read.csv("C:/RIT Courses/FIN 780 - Financial Analytics/Ass B2/780 B2 FF3factors daily.csv", stringsAsFactors = FALSE, header = TRUE)
+
+
+#Data cleaning
+#------------------------------------------------
+#Get real decimals per professors instructions
+FF3$Mkt.RF <- FF3$Mkt.RF/100
+FF3$SMB <- FF3$SMB/100
+FF3$HML <- FF3$HML/100
+
+#Set up dates in both data sets
+daily$date <- as.Date(daily$date, format = "%m/%d/%Y")
+FF3$X <- as.character(FF3$X)
+FF3$X <- paste(substring(FF3$X, 0, 4), "-",substring(FF3$X, 5, 100), sep = "")
+FF3$X <- paste(substring(FF3$X, 0, 7), "-",substring(FF3$X, 8, 100), sep = "")
+FF3$X <- as.Date(FF3$X, format = "%Y-%m-%d")
+
+#Make single index model data set
+Market <- FF3[,c(1,2,3,4)]
+colnames(Market)[1] <- "date"
+
+daily1 <- left_join(daily, Market)
+
+#Convert so model runs
+daily1$RET <- as.numeric(daily1$RET)
+daily1$Mkt.RF <- as.numeric(daily1$Mkt.RF)
+daily1$SMB <- as.numeric(daily1$SMB)
+daily1$HML <- as.numeric(daily1$HML)
+
+#Find all rows that contain some NA - all have return as NA in common
+nulls <- daily1 %>% filter_all(any_vars(is.na(.)))
+
+daily1 <- daily1[!is.na(daily1$RET),]
+#------------------------------------------------
+
+training <- daily1[daily1$date >= as.Date("01/01/2005", format = "%m/%d/%Y") & daily1$date <= as.Date("12/31/2012", format = "%m/%d/%Y"),]
+
+training1 <- training %>% group_by(date) %>%
+  mutate(AvgExRET = mean(RET)) %>% 
+  mutate(AvgMkt = mean(Mkt.RF)) %>% 
+  mutate(AvgSMB = mean(SMB)) %>% 
+  mutate(AvgHML = mean(HML)) %>% 
+  distinct(date, .keep_all = TRUE)
+
+training2 <- training1 %>% 
+  select(date, AvgExRET, AvgMkt, AvgSMB, AvgHML) %>% 
+  gather(key = "variable", value = "value", -date)
+
+mkt <- training2[training2$variable == "AvgExRET" | training2$variable == "AvgMkt",]
+
+ret_mkt_plot <- ggplot(mkt, aes(x = date, y = value)) + 
+  geom_point(aes(color = variable, group = variable)) + 
+  scale_color_manual(values = c("steelblue", "darkred")) +
+  theme_minimal() +
+  ggtitle("Avg ExRet vs Avg Mkt.RF")
+
+SMB <- training2[training2$variable == "AvgExRET" | training2$variable == "AvgSMB",]
+
+ret_smb_plot <- ggplot(SMB, aes(x = date, y = value)) + 
+  geom_point(aes(color = variable, group = variable)) + 
+  scale_color_manual(values = c("darkred", "steelblue")) +
+  theme_minimal() +
+  ggtitle("Avg ExRet vs Avg SMB")
+
+HML <- training2[training2$variable == "AvgExRET" | training2$variable == "AvgHML",]
+
+ret_hml_plot <- ggplot(HML, aes(x = date, y = value)) + 
+  geom_point(aes(color = variable, group = variable)) + 
+  scale_color_manual(values = c("steelblue", "darkred")) +
+  theme_minimal() +
+  ggtitle("Avg ExRet vs Avg HML")
+
+plot_grid(ret_mkt_plot, ret_smb_plot, ret_hml_plot, labels = "AUTO")
+
+```
+
+
+
+#### **Part 4. Merging Dataframes to Retain Firms with Data in Both Training and Prediction Periods **
+##### It is important to note that some companies had data in the training period but did not have data in the prediction period and vice versa. For the purpose of our analysis, we decided to only proceed analyzing companies with data in both periods. We completed that as follows.
+##### We started by creating the pred_firms dataframe that stored all of the unique tickers from the df_prediction_temp dataframe in Part 3. We then used merge functions to combine the list of unique tickers (pred_firms) and the training dataframes in Part 3 for both SIM and FF3. 
+##### Then, we created the pred_firms_merge_sim (for SIM) and pred_firms_merge (for FF3) dataframes to output only those companies with data in both periods for each type of regression. 
+##### The result of the above shows us the names of the firms with complete data. df_prediction_sim (for SIM) and df_prediction (for FF3) filter the above results to only list firms with complete data.
+##### Finally, We arrange these final dataframes and use split to convert to a list of dataframes split based on ticker and then convert those lists to matrices for subsequent analysis.
+#### The ultimate prediction matrix that has to be multiplied needs to have columns adjusted to the rows of our to-be-created coefficient matrix to allow matrix multiplication and a successful resulting prediction based on our equations. So we create matrices accordingly.  
+
+```{r eval=FALSE}
+  # Creating a df to store unique tickers from prediction dataset to know which firms do we need to predict. 
+  pred_firms <- data.frame("TICKER" = unique(df_prediction_temp$TICKER))
+ 
+  # Creating a df, which combines/merges the dataframes for prediction df AND the df_training dataframes. 
+  pred_firms_merge_sim <- merge(pred_firms, df_training_sim, by.x = 'TICKER', by.y = 'TICKER')
+  pred_firms_merge <- merge(pred_firms, df_training, by.x = 'TICKER', by.y = 'TICKER')
+  
+  #Filter for only firms with complete data and store in df_prediction_sim (SIM) and df_prediction (FF3). 
+  df_prediction_sim <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge_sim$TICKER) %>%
+    arrange(TICKER)
+  df_prediction <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER)
+  
+  # List of prediction data by firms. The two variables below contain respective data for SIM and 3FF.
+  df_prediction_list_sim <-split(df_prediction_sim, df_prediction_sim$TICKER)
+  df_prediction_list <-split(df_prediction, df_prediction$TICKER)
+  
+  # Converting our list of to-predict dataframes into matrix. Only featching the FacMkt for SIM. 
+  df_prediction_matrix_sim <- lapply(df_prediction_list_sim, function(x){
+    cbind(1, x$FacMkt)
+  })
+  # Converting our list of to-predict dataframes into matrix. Only featching the FacMkt for 3FF. 
+  df_prediction_matrix <- lapply(df_prediction_list, function(x){
+    cbind(1, x$FacMkt, x$FacSMB, x$FacHML)
+  })
+  
+```
+
+#### **Part 5. Obtaining Regression Results for prediction multiplication and Summary Output**
+##### Now that we have pared down our data to just those firms with data in both the training and prediction periods, using our training datasets from Part 3 to create several outputs for both SIM and FF3. All of these results use lapply to pull the coefficients, rsquared values and alphas from the regression outputs calculated in Part 3 with the training dataframes for SIM and FF3. All outputs for this section will be as matrices for work in subsequent parts. 
+##### - Matrices for coefficients
+##### - List R-squared values - each corresponding to one firm.
+##### - List of alphas - each corresponding to one firm.
+
+```{r eval=FALSE}
+  # Calculating coefficients matrices for SIM and 3FF using the merged dataframes from Part 4.
+  coeffs_matrix_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){as.matrix(x$coefficients)})
+  coeffs_matrix <- lapply(pred_firms_merge$reg_result, function(x){as.matrix(x$coefficients)})
+  
+  #Calculating and storing R-squared values for SIM and 3FF.Lists containing these values corresponding to each firm. 
+  rsqrd_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    temp <- summary(x)
+    temp$r.squared
+  })
+  rsqrd_list <- lapply(pred_firms_merge$reg_result, function(x){
+    temp <- summary(x)
+    temp$r.squared
+  })
+  
+  # Fetching and storing alphas for SIM and 3FF like above. 
+  alpha_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  alpha_list <- lapply(pred_firms_merge$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  
+```
+
+
+#### **Part 6. Matrix Multiplication**
+##### Next, we matrix multiply the coefficient matrix from Part 5 and the prediction matrix from Part 6 resuting in a list of lists. Each sub-list contains all predictions for the predicted duration. We carefully handle matrix dimensions to ensure multiplication is possible and the resulting value is a single number for each day. 
+
+```{r eval=FALSE}
+  # Multiplying coeff matrices for SIM with prediction matrices for SIM. 
+  predictions_sim <- mapply(function(a,b) a %*% b, df_prediction_matrix_sim, coeffs_matrix_sim)
+  # Multiplying coeff matrices for 3FF with prediction matrices for 3FF. 
+  predictions <- mapply(function(a,b) a %*% b, df_prediction_matrix, coeffs_matrix)
+```
+
+#### **Part 7. Adjusting the Length of Lists for Rsquared and Alpha to Align with our Final Dataframe.**
+##### In this section, we apply the r squared and alpha values to the entire dataframe since only one rsquared and alpha value is calculated per firm, but our current dataframe outputs daily values. 
+
+```{r eval=FALSE}
+  # For each firm, there are many rows corresponding to daily data but only 1 R-squared value. So just scaling the size of Rsquared to match our dataframe. 
+  rsqrd_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, rsqrd_list_sim)
+  rsqrd_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions, rsqrd_list)
+  #print(rsqrd_list_adjusted[[1]])
+  
+  alpha_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list_sim)
+  alpha_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list)
+```
+
+
+
+#### **Part 8. Results Table (Table 1)**
+##### Finally, we put together our results from our previous calculations using a provided training and prediction period, and calculations using our resultant predictions and actual data. Please see output table below code explanations. 
+
+```{r eval=FALSE}
+  # Creating final dataframe with all computations. 
+  df_final_calc <- df_prediction_temp %>%
+    
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER) %>%
+
+    mutate(Rsqrd_3FF = unlist(rsqrd_list_adjusted)) %>%
+    mutate(Rsqrd_SIM = unlist(rsqrd_list_adjusted_sim)) %>%
+
+    mutate(Prediction_SIM = unlist(predictions_sim)) %>%
+    mutate(Prediction_3FF = unlist(predictions)) %>%
+
+    mutate(alpha_SIM = unlist(alpha_list_adjusted_sim)) %>%
+    mutate(alpha_3FF = unlist(alpha_list_adjusted)) %>%
+  
+    mutate(pred_err_SIM = exRET - Prediction_SIM) %>%
+    mutate(pred_err_3FF = exRET - Prediction_3FF) %>%
+
+    mutate(Abs_pred_err_SIM = abs(exRET - Prediction_SIM)) %>%
+    mutate(Abs_pred_err_3FF = abs(exRET - Prediction_3FF)) %>%
+
+    group_by(TICKER) %>%
+
+    mutate(mean_abs_PredErr_SIM = mean(Abs_pred_err_SIM)) %>%
+    mutate(mean_abs_PredErr_3FF = mean(Abs_pred_err_3FF)) %>%
+
+    mutate(stdev_PredErr_SIM = sd(alpha_SIM)) %>%
+    mutate(stdev_PredErr_3FF = sd(alpha_3FF)) %>%
+
+    slice(1) %>%
+    na.omit() %>%
+    ungroup()
+  
+  df_final <- df_final_calc %>%
+    select(TICKER, Rsqrd_SIM, Rsqrd_3FF, alpha_SIM, alpha_3FF, mean_abs_PredErr_SIM, mean_abs_PredErr_3FF, stdev_PredErr_SIM, stdev_PredErr_3FF)
+
+```
+
+
+#### **Part 9. High level Summary Table (Table 2)**
+##### This final table shows a very brief comparison of the two models. It shows what each of the metrics 'generally, were with each model. Most importantly, the Average mean prediction error with the Single Index Model and the Fama French 3 Factor Model can be seen. Please see output table in the next section. 
+
+```{r eval=FALSE}
+ # Summary data to show how each model performed. 
+  
+  df_summary <- df_final %>%
+    mutate(Overall_mean_Rsqrd_SIM = mean(Rsqrd_SIM)) %>%
+    mutate(Overall_mean_Rsqrd_3FF = mean(Rsqrd_3FF)) %>%
+    
+    mutate(Overall_mean_alpha_SIM = mean(alpha_SIM)) %>%
+    mutate(Overall_mean_alpha_3FF = mean(alpha_3FF)) %>%
+    
+    mutate(Overall_mean_PredErr_SIM = mean(mean_abs_PredErr_SIM)) %>%
+    mutate(Overall_mean_PredErr_3FF = mean(mean_abs_PredErr_3FF)) %>%
+    
+    mutate(Overall_mean_stdev_SIM = mean(stdev_PredErr_SIM)) %>%
+    mutate(Overall_mean_stdev_3FF = mean(stdev_PredErr_3FF)) %>%
+    
+    select(Overall_mean_Rsqrd_SIM, Overall_mean_Rsqrd_3FF, Overall_mean_alpha_SIM, Overall_mean_alpha_3FF, Overall_mean_PredErr_SIM, Overall_mean_PredErr_3FF, Overall_mean_stdev_SIM, Overall_mean_stdev_3FF) %>%
+    slice(1)
+  print(df_summary)
+```
+
+#### **Part 10: Plot**
+##### At last, we plot a graph of Rsquared values with mean absolute prediction error for each model to see how each model performed in summary. 
+
+```{r eval=FALSE}
+  ggplot(data = df_final) +  
+      xlab(label = "R Squared Values") +
+      ylab(label = "Mean Absolute Prediction Error") +
+      geom_smooth(mapping = aes(x = Rsqrd_SIM, y = mean_abs_PredErr_SIM, color = 'SIM'), se = FALSE) +
+      geom_smooth(mapping = aes(x = Rsqrd_3FF, y = mean_abs_PredErr_3FF, color = '3FF'), se = FALSE) +
+      scale_colour_manual(name="legend", values=c("red", "blue")) +
+      ggtitle("R Squared - MAE plots for SIM and 3FF") +
+      theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+```
+
+### **D. Running the function for training period: 2005-2012, and prediction period: 2013-2014.** 
+
+```{r eval=FALSE}
+
+train <- c("20050101", "20121231")
+predict <- c("20130101", "20141231")
+
+reg_comparator("780 B2 Stocks daily.csv", "780 B2 FF3factors daily.csv", train, predict)
+
+```
+
+
+### **E. Output Tables and graph** 
+#### **Main Regressions Results Table:**
+
+```{r echo=FALSE, message=FALSE}
+
+reg_comparator <- function(stocks_filename, ff3facs_filename, training, pred){
+  
+  # Preparing to read data
+  fil_dir <- "C:/RIT Courses/FIN 780 - Financial Analytics/Ass B2/"
+  stocks_file <- paste(fil_dir, as.character(stocks_filename), sep = "")
+  ff3facs_file <- paste(fil_dir, as.character(ff3facs_filename), sep = "")
+  
+  # Setting dates for training and prediction
+  training_from <- as.numeric(training[1])
+  training_till <- as.numeric(training[length(training)])
+  prediction_from <- as.numeric(pred[1])
+  prediction_till <- as.numeric(pred[length(pred)])
+  
+  # Reading data
+  stocks <- read.csv(stocks_file, na.strings = "C")
+  stocks$date1 <- as.Date(as.character(stocks$date), "%m/%d/%Y")
+  stocks$finaldate <- format(stocks$date1, "%Y%m%d")
+  
+  ff3facs <- read.csv(ff3facs_file, na.strings = "C")
+  #print(colnames(ff3facs[1])) # first column is already names X.
+  ff3facs$X <- as.character(ff3facs$X) # renaming hidden X to X so the name is replaced and visible. 
+  
+  # Merging the two dataframes into one. 
+  df_temp <- merge(stocks, ff3facs, by.x = "finaldate", by.y = "X")
+  df_temp$date <- as.numeric(df_temp$finaldate)
+  
+  df <- df_temp %>%
+    mutate(exRET = RET - (RF/100),
+           FacMkt = Mkt.RF/100,
+           FacSMB = SMB/100,
+           FacHML = HML/100,
+           RF_dec = RF/100) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML, RF_dec) #date 1 is just for us to visualize easily
+  
+  
+  # Final dataframe to run SIM regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training_sim <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt)))
+  
+  
+  
+  # Final dataframe to run 3FF regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt + FacSMB + FacHML)))
+ 
+  #x <- df_training$reg_result[[which(df_training$TICKER == 'MSFT')]]
+  #print(x$coefficients)
+  
+  # Creating prediction dataframe - ACTUAL data. 
+  df_prediction_temp <- df %>%
+    filter((date >= prediction_from) & (date <= prediction_till)) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML) %>%
+    arrange(TICKER)
+  
+  
+  # Creating a df to store unique tickers from prediction dataset to know which firms do we need to predict. 
+  pred_firms <- data.frame("TICKER" = unique(df_prediction_temp$TICKER))
+ 
+  
+  # IMP NOTE: The idea is that it is possible that we had a different set of firms in the training period for which we calculated the coefficients; and we have a different set of firms for which we are predicting. This merge will only keep data for those firms for which we have coefficients AND the predicted period's ACTUAL data. Below are merged datasets for SIM and 3FF. 
+  
+  # Creating a df, which combines/merges the dataframes for prediction df AND the df_training_sim. 
+  pred_firms_merge_sim <- merge(pred_firms, df_training_sim, by.x = 'TICKER', by.y = 'TICKER')
+  
+  # Creating a df, which combines/merges the dataframes for prediction df AND the df_training (3FF).
+  pred_firms_merge <- merge(pred_firms, df_training, by.x = 'TICKER', by.y = 'TICKER')
+  
+  
+  # Here, i know the names of firm that we have complete data for. So in the original prediction df for SIM, i filter for only those names and store in df_prediction_sim. 
+  df_prediction_sim <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge_sim$TICKER) %>%
+    arrange(TICKER)
+  
+  
+  # Here, i know the names of firm that we have complete data for. So in the original prediction df for 3FF, i filter for only those names and store in df_prediction. 
+  df_prediction <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER)
+  
+  
+  # list of prediction data by firms. The two variables below contain respective data for SIM and 3FF. They are lists containing dataframes for each firm. 
+  df_prediction_list_sim <-split(df_prediction_sim, df_prediction_sim$TICKER)
+  
+  df_prediction_list <-split(df_prediction, df_prediction$TICKER)
+  
+  
+  # Here, calculating coefficients matrices for SIM and 3FF. We are using the merged dataframe to again esnure we only pick coeffs for those firms which we have the prediction data for. 
+  coeffs_matrix_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){as.matrix(x$coefficients)})
+  coeffs_matrix <- lapply(pred_firms_merge$reg_result, function(x){as.matrix(x$coefficients)})
+  
+  
+  # Here, calculating and storing R-squared values for SIM and 3FF. They are lists containing these values corresponding to each firm. 
+  rsqrd_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    temp1 <- summary(x)
+    temp1$r.squared
+  })
+  
+  rsqrd_list <- lapply(pred_firms_merge$reg_result, function(x){
+    temp <- summary(x)
+    temp$r.squared
+  })
+  
+  # Fetching and storing alphas for SIM and 3FF like above. 
+  alpha_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  alpha_list <- lapply(pred_firms_merge$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  
+  
+  # Converting our list of to-predict dataframes into matrix. Only fetching the FacMkt for SIM. 
+  df_prediction_matrix_sim <- lapply(df_prediction_list_sim, function(x){
+    cbind(1, x$FacMkt)
+  })
+  # Converting our list of to-predict dataframes into matrix. Fetching the FacMkt, FacSMB and Fac HML for 3FF. 
+  df_prediction_matrix <- lapply(df_prediction_list, function(x){
+    cbind(1, x$FacMkt, x$FacSMB, x$FacHML)
+  })
+  
+  
+  # Multiplying coeff matrices for SIM with prediction matrices for SIM. 
+  predictions_sim <- mapply(function(a,b) a %*% b, df_prediction_matrix_sim, coeffs_matrix_sim)
+  # Multiplying coeff matrices for 3FF with prediction matrices for 3FF. 
+  predictions <- mapply(function(a,b) a %*% b, df_prediction_matrix, coeffs_matrix)
+  
+  
+  # For each firm, there are many rows corresponding to daily data but only 1 R-squared value. So just scaling the size of Rsquare to match our dataframe. 
+  rsqrd_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, rsqrd_list_sim)
+  rsqrd_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions, rsqrd_list)
+  #print(rsqrd_list_adjusted[[1]])
+  
+  alpha_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list_sim)
+  alpha_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list)
+  
+  # Creating final dataframe with all computations. 
+  df_final_calc <- df_prediction_temp %>%
+    
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER) %>%
+
+    mutate(Rsqrd_3FF = unlist(rsqrd_list_adjusted)) %>%
+    mutate(Rsqrd_SIM = unlist(rsqrd_list_adjusted_sim)) %>%
+
+    mutate(Prediction_SIM = unlist(predictions_sim)) %>%
+    mutate(Prediction_3FF = unlist(predictions)) %>%
+
+    mutate(alpha_SIM = unlist(alpha_list_adjusted_sim)) %>%
+    mutate(alpha_3FF = unlist(alpha_list_adjusted)) %>%
+
+    mutate(pred_err_SIM = exRET - Prediction_SIM) %>%
+    mutate(pred_err_3FF = exRET - Prediction_3FF) %>%
+    
+    mutate(Abs_pred_err_SIM = abs(exRET - Prediction_SIM)) %>%
+    mutate(Abs_pred_err_3FF = abs(exRET - Prediction_3FF)) %>%
+
+    group_by(TICKER) %>%
+
+    mutate(mean_abs_PredErr_SIM = mean(Abs_pred_err_SIM)) %>%
+    mutate(mean_abs_PredErr_3FF = mean(Abs_pred_err_3FF)) %>%
+
+    mutate(stdev_PredErr_SIM = sd(pred_err_SIM)) %>%
+    mutate(stdev_PredErr_3FF = sd(pred_err_3FF)) %>%
+
+    slice(1) %>%
+    na.omit() %>%
+    ungroup()
+  
+  df_final <- df_final_calc %>%
+    select(TICKER, Rsqrd_SIM, Rsqrd_3FF, alpha_SIM, alpha_3FF, mean_abs_PredErr_SIM, mean_abs_PredErr_3FF, stdev_PredErr_SIM, stdev_PredErr_3FF)
+  
+  
+  
+  
+  print.data.frame(df_final)
+ 
+  # Summary data to show how each model performed. 
+  
+  df_summary <- df_final %>%
+    mutate(MeanRsqrdSIM = mean(Rsqrd_SIM)) %>%
+    mutate(MeanRsqrd3FF = mean(Rsqrd_3FF)) %>%
+    
+    mutate(MeanAlphaSIM = mean(alpha_SIM)) %>%
+    mutate(MeanAlpha3FF = mean(alpha_3FF)) %>%
+    
+    mutate(MeanPredErrSIM = mean(mean_abs_PredErr_SIM)) %>%
+    mutate(MeanPredErr3FF = mean(mean_abs_PredErr_3FF)) %>%
+    
+    mutate(MeanStDevSIM = mean(stdev_PredErr_SIM)) %>%
+    mutate(MeanStDev3FF = mean(stdev_PredErr_3FF)) %>%
+    
+    select(MeanRsqrdSIM, MeanRsqrd3FF, MeanAlphaSIM, MeanAlpha3FF, MeanPredErrSIM, MeanPredErr3FF, MeanStDevSIM, MeanStDev3FF) %>%
+    slice(1)
+  
+  #print("High Level summary table:")
+  #print.data.frame(df_summary)
+  
+  
+  #print("Final plot:")
+  # Final Plot to show results
+  # ggplot(data = df_final) +  
+  #   xlab(label = "R Squared Values") +
+  #   ylab(label = "Mean Absolute Prediction Error") +
+  #   geom_smooth(mapping = aes(x = Rsqrd_SIM, y = mean_abs_PredErr_SIM, color = 'SIM'), se = FALSE) +
+  #   geom_smooth(mapping = aes(x = Rsqrd_3FF, y = mean_abs_PredErr_3FF, color = '3FF'), se = FALSE) +
+  #   scale_colour_manual(name="legend", values=c("red", "blue")) +
+  #   ggtitle("R Squared - MAE plots for SIM and 3FF") +
+  #   theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+}
+
+train <- c("20050101", "20121231")
+predict <- c("20130101", "20141231")
+
+reg_comparator("780 B2 Stocks daily.csv", "780 B2 FF3factors daily.csv", train, predict)
+
+```
+#### After cleansing all the data, performing regressions, and calculating all metrics, we arrive at these firms and their data which encapsulates all the results. 
+
+#### **High Level Summary Table**
+```{r echo=FALSE, message=FALSE}
+
+reg_comparator <- function(stocks_filename, ff3facs_filename, training, pred){
+  
+  # Preparing to read data
+  fil_dir <- "C:/RIT Courses/FIN 780 - Financial Analytics/Ass B2/"
+  stocks_file <- paste(fil_dir, as.character(stocks_filename), sep = "")
+  ff3facs_file <- paste(fil_dir, as.character(ff3facs_filename), sep = "")
+  
+  # Setting dates for training and prediction
+  training_from <- as.numeric(training[1])
+  training_till <- as.numeric(training[length(training)])
+  prediction_from <- as.numeric(pred[1])
+  prediction_till <- as.numeric(pred[length(pred)])
+  
+  # Reading data
+  stocks <- read.csv(stocks_file, na.strings = "C")
+  stocks$date1 <- as.Date(as.character(stocks$date), "%m/%d/%Y")
+  stocks$finaldate <- format(stocks$date1, "%Y%m%d")
+  
+  ff3facs <- read.csv(ff3facs_file, na.strings = "C")
+  #print(colnames(ff3facs[1])) # first column is already names X.
+  ff3facs$X <- as.character(ff3facs$X) # renaming hidden X to X so the name is replaced and visible. 
+  
+  # Merging the two dataframes into one. 
+  df_temp <- merge(stocks, ff3facs, by.x = "finaldate", by.y = "X")
+  df_temp$date <- as.numeric(df_temp$finaldate)
+  
+  df <- df_temp %>%
+    mutate(exRET = RET - (RF/100),
+           FacMkt = Mkt.RF/100,
+           FacSMB = SMB/100,
+           FacHML = HML/100,
+           RF_dec = RF/100) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML, RF_dec) #date 1 is just for us to visualize easily
+  
+  
+  # Final dataframe to run SIM regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training_sim <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt)))
+  
+  
+  
+  # Final dataframe to run 3FF regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt + FacSMB + FacHML)))
+ 
+  #x <- df_training$reg_result[[which(df_training$TICKER == 'MSFT')]]
+  #print(x$coefficients)
+  
+  # Creating prediction dataframe - ACTUAL data. 
+  df_prediction_temp <- df %>%
+    filter((date >= prediction_from) & (date <= prediction_till)) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML) %>%
+    arrange(TICKER)
+  
+  
+  # Creating a df to store unique tickers from prediction dataset to know which firms do we need to predict. 
+  pred_firms <- data.frame("TICKER" = unique(df_prediction_temp$TICKER))
+ 
+  
+  # IMP NOTE: The idea is that it is possible that we had a different set of firms in the training period for which we calculated the coefficients; and we have a different set of firms for which we are predicting. This merge will only keep data for those firms for which we have coefficients AND the predicted period's ACTUAL data. Below are merged datasets for SIM and 3FF. 
+  
+  # Creating a df, which combines/merges the dataframes for prediction df AND the df_training_sim. 
+  pred_firms_merge_sim <- merge(pred_firms, df_training_sim, by.x = 'TICKER', by.y = 'TICKER')
+  
+  # Creating a df, which combines/merges the dataframes for prediction df AND the df_training (3FF).
+  pred_firms_merge <- merge(pred_firms, df_training, by.x = 'TICKER', by.y = 'TICKER')
+  
+  
+  # Here, i know the names of firm that we have complete data for. So in the original prediction df for SIM, i filter for only those names and store in df_prediction_sim. 
+  df_prediction_sim <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge_sim$TICKER) %>%
+    arrange(TICKER)
+  
+  
+  # Here, i know the names of firm that we have complete data for. So in the original prediction df for 3FF, i filter for only those names and store in df_prediction. 
+  df_prediction <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER)
+  
+  
+  # list of prediction data by firms. The two variables below contain respective data for SIM and 3FF. They are lists containing dataframes for each firm. 
+  df_prediction_list_sim <-split(df_prediction_sim, df_prediction_sim$TICKER)
+  
+  df_prediction_list <-split(df_prediction, df_prediction$TICKER)
+  
+  
+  # Here, calculating coefficients matrices for SIM and 3FF. We are using the merged dataframe to again esnure we only pick coeffs for those firms which we have the prediction data for. 
+  coeffs_matrix_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){as.matrix(x$coefficients)})
+  coeffs_matrix <- lapply(pred_firms_merge$reg_result, function(x){as.matrix(x$coefficients)})
+  
+  
+  # Here, calculating and storing R-squared values for SIM and 3FF. They are lists containing these values corresponding to each firm. 
+  rsqrd_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    temp1 <- summary(x)
+    temp1$r.squared
+  })
+  
+  rsqrd_list <- lapply(pred_firms_merge$reg_result, function(x){
+    temp <- summary(x)
+    temp$r.squared
+  })
+  
+  # Fetching and storing alphas for SIM and 3FF like above. 
+  alpha_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  alpha_list <- lapply(pred_firms_merge$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  
+  
+  # Converting our list of to-predict dataframes into matrix. Only fetching the FacMkt for SIM. 
+  df_prediction_matrix_sim <- lapply(df_prediction_list_sim, function(x){
+    cbind(1, x$FacMkt)
+  })
+  # Converting our list of to-predict dataframes into matrix. Fetching the FacMkt, FacSMB and Fac HML for 3FF. 
+  df_prediction_matrix <- lapply(df_prediction_list, function(x){
+    cbind(1, x$FacMkt, x$FacSMB, x$FacHML)
+  })
+  
+  
+  # Multiplying coeff matrices for SIM with prediction matrices for SIM. 
+  predictions_sim <- mapply(function(a,b) a %*% b, df_prediction_matrix_sim, coeffs_matrix_sim)
+  # Multiplying coeff matrices for 3FF with prediction matrices for 3FF. 
+  predictions <- mapply(function(a,b) a %*% b, df_prediction_matrix, coeffs_matrix)
+  
+  
+  # For each firm, there are many rows corresponding to daily data but only 1 R-squared value. So just scaling the size of Rsquare to match our dataframe. 
+  rsqrd_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, rsqrd_list_sim)
+  rsqrd_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions, rsqrd_list)
+  #print(rsqrd_list_adjusted[[1]])
+  
+  alpha_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list_sim)
+  alpha_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list)
+  
+  # Creating final dataframe with all computations. 
+  df_final_calc <- df_prediction_temp %>%
+    
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER) %>%
+
+    mutate(Rsqrd_3FF = unlist(rsqrd_list_adjusted)) %>%
+    mutate(Rsqrd_SIM = unlist(rsqrd_list_adjusted_sim)) %>%
+
+    mutate(Prediction_SIM = unlist(predictions_sim)) %>%
+    mutate(Prediction_3FF = unlist(predictions)) %>%
+
+    mutate(alpha_SIM = unlist(alpha_list_adjusted_sim)) %>%
+    mutate(alpha_3FF = unlist(alpha_list_adjusted)) %>%
+
+    mutate(pred_err_SIM = exRET - Prediction_SIM) %>%
+    mutate(pred_err_3FF = exRET - Prediction_3FF) %>%
+    
+    mutate(Abs_pred_err_SIM = abs(exRET - Prediction_SIM)) %>%
+    mutate(Abs_pred_err_3FF = abs(exRET - Prediction_3FF)) %>%
+
+    group_by(TICKER) %>%
+
+    mutate(mean_abs_PredErr_SIM = mean(Abs_pred_err_SIM)) %>%
+    mutate(mean_abs_PredErr_3FF = mean(Abs_pred_err_3FF)) %>%
+
+    mutate(stdev_PredErr_SIM = sd(pred_err_SIM)) %>%
+    mutate(stdev_PredErr_3FF = sd(pred_err_3FF)) %>%
+
+    slice(1) %>%
+    na.omit() %>%
+    ungroup()
+  
+  df_final <- df_final_calc %>%
+    select(TICKER, Rsqrd_SIM, Rsqrd_3FF, alpha_SIM, alpha_3FF, mean_abs_PredErr_SIM, mean_abs_PredErr_3FF, stdev_PredErr_SIM, stdev_PredErr_3FF)
+  
+  
+  #print("Main regressions output table:")
+  
+  #print.data.frame(df_final)
+ 
+  # Summary data to show how each model performed. 
+  
+  df_summary <- df_final %>%
+    mutate(MeanRsqrdSIM = mean(Rsqrd_SIM)) %>%
+    mutate(MeanRsqrd3FF = mean(Rsqrd_3FF)) %>%
+    
+    mutate(MeanAlphaSIM = mean(alpha_SIM)) %>%
+    mutate(MeanAlpha3FF = mean(alpha_3FF)) %>%
+    
+    mutate(MeanPredErrSIM = mean(mean_abs_PredErr_SIM)) %>%
+    mutate(MeanPredErr3FF = mean(mean_abs_PredErr_3FF)) %>%
+    
+    mutate(MeanStDevSIM = mean(stdev_PredErr_SIM)) %>%
+    mutate(MeanStDev3FF = mean(stdev_PredErr_3FF)) %>%
+    
+    select(MeanRsqrdSIM, MeanRsqrd3FF, MeanAlphaSIM, MeanAlpha3FF, MeanPredErrSIM, MeanPredErr3FF, MeanStDevSIM, MeanStDev3FF) %>%
+    slice(1)
+  
+  #print("High Level summary table:")
+  print.data.frame(df_summary)
+  
+  
+  # print("Final plot:")
+  # # Final Plot to show results
+  # ggplot(data = df_final) +  
+  #   xlab(label = "R Squared Values") +
+  #   ylab(label = "Mean Absolute Prediction Error") +
+  #   geom_smooth(mapping = aes(x = Rsqrd_SIM, y = mean_abs_PredErr_SIM, color = 'SIM'), se = FALSE) +
+  #   geom_smooth(mapping = aes(x = Rsqrd_3FF, y = mean_abs_PredErr_3FF, color = '3FF'), se = FALSE) +
+  #   scale_colour_manual(name="legend", values=c("red", "blue")) +
+  #   ggtitle("R Squared - MAE plots for SIM and 3FF") +
+  #   theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+}
+
+train <- c("20050101", "20121231")
+predict <- c("20130101", "20141231")
+
+reg_comparator("780 B2 Stocks daily.csv", "780 B2 FF3factors daily.csv", train, predict)
+
+```
+#### This table calculates means for All columns of table 1 to show a brief overview of what the two models generally produced. We can see that the mean prediction error for 3FF is slightly less than SIM across all firms generally.
+
+#### Also, we noticed that the overall mean Rsquared value of 3FF is higher than SIM meaning it fitted the data better than SIM hence lesser prediction errors. 
+
+
+#### **Graph Plot**
+
+##### From our main table, we plotted the Rsqrd values against mean prediction error for each firm. The firms are not shown because they are not important to our objective of this graph. 
+```{r echo=FALSE, message=FALSE}
+
+reg_comparator <- function(stocks_filename, ff3facs_filename, training, pred){
+  
+  # Preparing to read data
+  fil_dir <- "C:/RIT Courses/FIN 780 - Financial Analytics/Ass B2/"
+  stocks_file <- paste(fil_dir, as.character(stocks_filename), sep = "")
+  ff3facs_file <- paste(fil_dir, as.character(ff3facs_filename), sep = "")
+  
+  # Setting dates for training and prediction
+  training_from <- as.numeric(training[1])
+  training_till <- as.numeric(training[length(training)])
+  prediction_from <- as.numeric(pred[1])
+  prediction_till <- as.numeric(pred[length(pred)])
+  
+  # Reading data
+  stocks <- read.csv(stocks_file, na.strings = "C")
+  stocks$date1 <- as.Date(as.character(stocks$date), "%m/%d/%Y")
+  stocks$finaldate <- format(stocks$date1, "%Y%m%d")
+  
+  ff3facs <- read.csv(ff3facs_file, na.strings = "C")
+  #print(colnames(ff3facs[1])) # first column is already names X.
+  ff3facs$X <- as.character(ff3facs$X) # renaming hidden X to X so the name is replaced and visible. 
+  
+  # Merging the two dataframes into one. 
+  df_temp <- merge(stocks, ff3facs, by.x = "finaldate", by.y = "X")
+  df_temp$date <- as.numeric(df_temp$finaldate)
+  
+  df <- df_temp %>%
+    mutate(exRET = RET - (RF/100),
+           FacMkt = Mkt.RF/100,
+           FacSMB = SMB/100,
+           FacHML = HML/100,
+           RF_dec = RF/100) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML, RF_dec) #date 1 is just for us to visualize easily
+  
+  
+  # Final dataframe to run SIM regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training_sim <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt)))
+  
+  
+  
+  # Final dataframe to run 3FF regression on. This dataframe will have TICKERS and for each ticker, a regression result. 
+  df_training <- df %>%
+    filter((date >= training_from) & (date <= training_till)) %>%
+    group_by(TICKER) %>%
+    summarise(reg_result = list(lm(exRET ~ FacMkt + FacSMB + FacHML)))
+ 
+  #x <- df_training$reg_result[[which(df_training$TICKER == 'MSFT')]]
+  #print(x$coefficients)
+  
+  # Creating prediction dataframe - ACTUAL data. 
+  df_prediction_temp <- df %>%
+    filter((date >= prediction_from) & (date <= prediction_till)) %>%
+    select(date, date1, TICKER, exRET, FacMkt, FacSMB, FacHML) %>%
+    arrange(TICKER)
+  
+  
+  # Creating a df to store unique tickers from prediction dataset to know which firms do we need to predict. 
+  pred_firms <- data.frame("TICKER" = unique(df_prediction_temp$TICKER))
+ 
+  
+  # IMP NOTE: The idea is that it is possible that we had a different set of firms in the training period for which we calculated the coefficients; and we have a different set of firms for which we are predicting. This merge will only keep data for those firms for which we have coefficients AND the predicted period's ACTUAL data. Below are merged datasets for SIM and 3FF. 
+  
+  # Creating a df, which combines/merges the dataframes for prediction df AND the df_training_sim. 
+  pred_firms_merge_sim <- merge(pred_firms, df_training_sim, by.x = 'TICKER', by.y = 'TICKER')
+  
+  # Creating a df, which combines/merges the dataframes for prediction df AND the df_training (3FF).
+  pred_firms_merge <- merge(pred_firms, df_training, by.x = 'TICKER', by.y = 'TICKER')
+  
+  
+  # Here, i know the names of firm that we have complete data for. So in the original prediction df for SIM, i filter for only those names and store in df_prediction_sim. 
+  df_prediction_sim <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge_sim$TICKER) %>%
+    arrange(TICKER)
+  
+  
+  # Here, i know the names of firm that we have complete data for. So in the original prediction df for 3FF, i filter for only those names and store in df_prediction. 
+  df_prediction <- df_prediction_temp %>%
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER)
+  
+  
+  # list of prediction data by firms. The two variables below contain respective data for SIM and 3FF. They are lists containing dataframes for each firm. 
+  df_prediction_list_sim <-split(df_prediction_sim, df_prediction_sim$TICKER)
+  
+  df_prediction_list <-split(df_prediction, df_prediction$TICKER)
+  
+  
+  # Here, calculating coefficients matrices for SIM and 3FF. We are using the merged dataframe to again esnure we only pick coeffs for those firms which we have the prediction data for. 
+  coeffs_matrix_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){as.matrix(x$coefficients)})
+  coeffs_matrix <- lapply(pred_firms_merge$reg_result, function(x){as.matrix(x$coefficients)})
+  
+  
+  # Here, calculating and storing R-squared values for SIM and 3FF. They are lists containing these values corresponding to each firm. 
+  rsqrd_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    temp1 <- summary(x)
+    temp1$r.squared
+  })
+  
+  rsqrd_list <- lapply(pred_firms_merge$reg_result, function(x){
+    temp <- summary(x)
+    temp$r.squared
+  })
+  
+  # Fetching and storing alphas for SIM and 3FF like above. 
+  alpha_list_sim <- lapply(pred_firms_merge_sim$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  alpha_list <- lapply(pred_firms_merge$reg_result, function(x){
+    alpha_temp <- as.matrix(x$coefficients)
+    alpha_temp[1,1]
+  })
+  
+  
+  # Converting our list of to-predict dataframes into matrix. Only fetching the FacMkt for SIM. 
+  df_prediction_matrix_sim <- lapply(df_prediction_list_sim, function(x){
+    cbind(1, x$FacMkt)
+  })
+  # Converting our list of to-predict dataframes into matrix. Fetching the FacMkt, FacSMB and Fac HML for 3FF. 
+  df_prediction_matrix <- lapply(df_prediction_list, function(x){
+    cbind(1, x$FacMkt, x$FacSMB, x$FacHML)
+  })
+  
+  
+  # Multiplying coeff matrices for SIM with prediction matrices for SIM. 
+  predictions_sim <- mapply(function(a,b) a %*% b, df_prediction_matrix_sim, coeffs_matrix_sim)
+  # Multiplying coeff matrices for 3FF with prediction matrices for 3FF. 
+  predictions <- mapply(function(a,b) a %*% b, df_prediction_matrix, coeffs_matrix)
+  
+  
+  # For each firm, there are many rows corresponding to daily data but only 1 R-squared value. So just scaling the size of Rsquare to match our dataframe. 
+  rsqrd_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, rsqrd_list_sim)
+  rsqrd_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions, rsqrd_list)
+  #print(rsqrd_list_adjusted[[1]])
+  
+  alpha_list_adjusted_sim <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list_sim)
+  alpha_list_adjusted <- mapply(function(a,b) rep(b, length(a)), predictions_sim, alpha_list)
+  
+  # Creating final dataframe with all computations. 
+  df_final_calc <- df_prediction_temp %>%
+    
+    filter(TICKER %in% pred_firms_merge$TICKER) %>%
+    arrange(TICKER) %>%
+
+    mutate(Rsqrd_3FF = unlist(rsqrd_list_adjusted)) %>%
+    mutate(Rsqrd_SIM = unlist(rsqrd_list_adjusted_sim)) %>%
+
+    mutate(Prediction_SIM = unlist(predictions_sim)) %>%
+    mutate(Prediction_3FF = unlist(predictions)) %>%
+
+    mutate(alpha_SIM = unlist(alpha_list_adjusted_sim)) %>%
+    mutate(alpha_3FF = unlist(alpha_list_adjusted)) %>%
+
+    mutate(pred_err_SIM = exRET - Prediction_SIM) %>%
+    mutate(pred_err_3FF = exRET - Prediction_3FF) %>%
+    
+    mutate(Abs_pred_err_SIM = abs(exRET - Prediction_SIM)) %>%
+    mutate(Abs_pred_err_3FF = abs(exRET - Prediction_3FF)) %>%
+
+    group_by(TICKER) %>%
+
+    mutate(mean_abs_PredErr_SIM = mean(Abs_pred_err_SIM)) %>%
+    mutate(mean_abs_PredErr_3FF = mean(Abs_pred_err_3FF)) %>%
+
+    mutate(stdev_PredErr_SIM = sd(pred_err_SIM)) %>%
+    mutate(stdev_PredErr_3FF = sd(pred_err_3FF)) %>%
+
+    slice(1) %>%
+    na.omit() %>%
+    ungroup()
+  
+  df_final <- df_final_calc %>%
+    select(TICKER, Rsqrd_SIM, Rsqrd_3FF, alpha_SIM, alpha_3FF, mean_abs_PredErr_SIM, mean_abs_PredErr_3FF, stdev_PredErr_SIM, stdev_PredErr_3FF)
+  
+  
+  #print("Main regressions output table:")
+  
+  #print.data.frame(df_final)
+ 
+  # Summary data to show how each model performed. 
+  
+  df_summary <- df_final %>%
+    mutate(MeanRsqrdSIM = mean(Rsqrd_SIM)) %>%
+    mutate(MeanRsqrd3FF = mean(Rsqrd_3FF)) %>%
+    
+    mutate(MeanAlphaSIM = mean(alpha_SIM)) %>%
+    mutate(MeanAlpha3FF = mean(alpha_3FF)) %>%
+    
+    mutate(MeanPredErrSIM = mean(mean_abs_PredErr_SIM)) %>%
+    mutate(MeanPredErr3FF = mean(mean_abs_PredErr_3FF)) %>%
+    
+    mutate(MeanStDevSIM = mean(stdev_PredErr_SIM)) %>%
+    mutate(MeanStDev3FF = mean(stdev_PredErr_3FF)) %>%
+    
+    select(MeanRsqrdSIM, MeanRsqrd3FF, MeanAlphaSIM, MeanAlpha3FF, MeanPredErrSIM, MeanPredErr3FF, MeanStDevSIM, MeanStDev3FF) %>%
+    slice(1)
+  
+  #print("High Level summary table:")
+  #print.data.frame(df_summary)
+  
+  
+  #print("Final plot:")
+  # Final Plot to show results
+  ggplot(data = df_final) +  
+    xlab(label = "R Squared Values") +
+    ylab(label = "Mean Absolute Prediction Error") +
+    geom_smooth(mapping = aes(x = Rsqrd_SIM, y = mean_abs_PredErr_SIM, color = 'SIM'), se = FALSE) +
+    geom_smooth(mapping = aes(x = Rsqrd_3FF, y = mean_abs_PredErr_3FF, color = '3FF'), se = FALSE) +
+    scale_colour_manual(name="legend", values=c("red", "blue")) +
+    ggtitle("R Squared - MAE plots for SIM and 3FF") +
+    theme(plot.title = element_text(hjust = 0.5, size = 15))
+
+}
+
+train <- c("20050101", "20121231")
+predict <- c("20130101", "20141231")
+
+reg_comparator("780 B2 Stocks daily.csv", "780 B2 FF3factors daily.csv", train, predict)
+
+```
+
+#### We see from this plot that for each model, the greater the Rsqrd value, lesser the mean prediction error as expected. 
+#### We notice that the Rsquared values for 3FF plot are generally larger leading to a plot displaced slightly to the right.
+#### The mean prediction error for 3FF is also slightly less in "most" parts leading to a plot slightly displaced towards the bottom. 
+
+### **F. Conclusion**
+#### We can conclude that both models provide good predictions generally. 
+#### 3FF does slightly better than SIM. 
+#### But as we saw from our initial graphs, the ExRET seemed to depend largely on Mkt.Rf (most significant) which both models incorporate, hence they have similar results. 
+#### FacSMB and FacHML dictate ExRET far less than Mkt.Rf so their inclusion in 3FF does improve the results but only slightly. 
+#### It is also possible that these two models would differ more for cases where FacSMB and FacHML have bigger roles to play. This process can be repeated for more cases to test further. 
